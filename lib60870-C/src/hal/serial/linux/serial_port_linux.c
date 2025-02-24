@@ -20,6 +20,7 @@
 
 #include "hal_serial.h"
 #include "hal_time.h"
+#include "hal_socket.h"
 
 struct sSerialPort {
     char interfaceName[100];
@@ -31,13 +32,55 @@ struct sSerialPort {
     uint64_t lastSentTime;
     struct timeval timeout;
     SerialPortError lastError;
+    Socket socket;
+    bool overTcp;
+    int port;
+    char ip[64];
 };
+
+
+bool parse_overtcp(const char* input, char* ip, int* port)
+{
+    const char* prefix = "overtcp://";
+    size_t prefix_len = strlen(prefix);
+ 
+    // Verificar si la cadena comienza con "overtcp://"
+    if (strncmp(input, prefix, prefix_len) != 0)
+    {
+        printf("Formato incorrecto\n");
+        return false;
+    }
+ 
+    // Extraer la parte después del prefijo
+    const char* address = input + prefix_len;
+ 
+    // Buscar el separador ":"
+    const char* colon_pos = strchr(address, ':');
+    if (colon_pos == NULL)
+    {
+        printf("Formato incorrecto, falta el puerto\n");
+        return false;
+    }
+ 
+    // Extraer IP
+    size_t ip_len = colon_pos - address;
+    strncpy(ip, address, ip_len);
+    ip[ip_len] = '\0'; // Asegurar terminación de string
+ 
+    // Extraer puerto
+    *port = atoi(colon_pos + 1);
+    return true;
+}
 
 
 SerialPort
 SerialPort_create(const char* interfaceName, int baudRate, uint8_t dataBits, char parity, uint8_t stopBits)
 {
     SerialPort self = (SerialPort) GLOBAL_MALLOC(sizeof(struct sSerialPort));
+
+    char ip[64];    
+    int port; 
+    bool overTcp = parse_overtcp(interfaceName, ip, &port);
 
     if (self != NULL) {
         self->fd = -1;
@@ -50,6 +93,10 @@ SerialPort_create(const char* interfaceName, int baudRate, uint8_t dataBits, cha
         self->timeout.tv_usec = 100000; /* 100 ms */
         strncpy(self->interfaceName, interfaceName, 99);
         self->lastError = SERIAL_PORT_ERROR_NONE;
+        self->overTcp = overTcp;
+        strncpy(self->ip, ip, 64);
+        self->port = port;
+        
     }
 
     return self;
@@ -59,13 +106,38 @@ void
 SerialPort_destroy(SerialPort self)
 {
     if (self != NULL) {
+        if(self->overTcp)
+        {
+            if (self->socket != NULL){
+                printf("destruir puerto tcp\n");
+                Socket_destroy(self->socket);
+                self->socket = -1;
+            }
+        }
+        else{
         GLOBAL_FREEMEM(self);
+        }
     }
 }
 
 bool
 SerialPort_open(SerialPort self)
 {
+
+    if (self->overTcp)
+    {
+        self->socket = TcpSocket_create();
+        if (Socket_connect(self->socket, self->ip, self->port))
+        {
+            printf("Socket connected \n");
+            return true;
+        }
+        else
+        {
+            return false;
+        }
+    }
+
     self->fd = open(self->interfaceName, O_RDWR | O_NOCTTY | O_NDELAY | O_EXCL);
 
     if (self->fd == -1) {
@@ -224,8 +296,19 @@ SerialPort_getLastError(SerialPort self)
 
 int
 SerialPort_readByte(SerialPort self)
-{
+{  
+
     uint8_t buf[1];
+
+    if (self->overTcp)
+    {
+        int len = Socket_read(self->socket, buf, 1);
+        if (len == 0)
+            return -1;
+        else
+            return (int)buf[0];
+    }
+
     fd_set set;
 
     self->lastError = SERIAL_PORT_ERROR_NONE;
@@ -252,6 +335,11 @@ int
 SerialPort_write(SerialPort self, uint8_t* buffer, int startPos, int bufSize)
 {
     /* TODO assure minimum line idle time? */
+
+    if (self->overTcp)
+    {
+        return Socket_write(self->socket, buffer + startPos, bufSize);        
+    }
 
     self->lastError = SERIAL_PORT_ERROR_NONE;
 

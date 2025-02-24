@@ -111,7 +111,8 @@ main(int argc, char** argv)
 {
     signal(SIGINT, sigint_handler);
 
-    const char* serialPort = "/dev/ttyUSB0";
+    const char* serialPort = "overtcp://192.168.1.222:20026";
+    //const char* serialPort = "/dev/ttyUSB0";
 
     if (argc > 1)
         serialPort = argv[1];
