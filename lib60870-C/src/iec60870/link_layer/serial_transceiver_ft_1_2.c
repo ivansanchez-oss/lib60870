@@ -56,6 +56,7 @@ SerialTransceiverFT12_create(SerialPort serialPort, LinkLayerParameters linkLaye
 void
 SerialTransceiverFT12_destroy(SerialTransceiverFT12 self)
 {
+    
     if (self != NULL)
         GLOBAL_FREEMEM(self);
 }
@@ -70,6 +71,7 @@ SerialTransceiverFT12_setTimeouts(SerialTransceiverFT12 self, int messageTimeout
 void
 SerialTransceiverFT12_setRawMessageHandler(SerialTransceiverFT12 self, IEC60870_RawMessageHandler handler, void* parameter)
 {
+   
     self->rawMessageHandler = handler;
     self->rawMessageHandlerParameter = parameter;
 }
@@ -82,11 +84,31 @@ SerialTransceiverFT12_getBaudRate(SerialTransceiverFT12 self)
 
 void
 SerialTransceiverFT12_sendMessage(SerialTransceiverFT12 self, uint8_t* msg, int msgSize)
-{
+{   
     if (self->rawMessageHandler)
         self->rawMessageHandler(self->rawMessageHandlerParameter, msg, msgSize, true);
-
+   
     SerialPort_write(self->serialPort, msg, 0, msgSize);
+
+
+    /*
+    int result = SerialPort_write(self->serialPort, msg, 0, msgSize);
+    if (result== -1){
+        printf("error al escribir mensaje en socket %d\n", msg);       
+    
+    
+    if (Overtcp_ReOpen(self->serialPort)) {              
+        result = SerialPort_write(self->serialPort, msg, 0, msgSize);
+        if (result == -1) {
+            printf("Error al reintentar escribir after de reconectar\n");
+        } else {
+            printf("Mensaje enviado exitosamente later de reconectar\n");
+        }
+    } else {
+    printf("No se pudo reconectar later de fallos\n");
+}   }
+    */
+    
 }
 
 static int
