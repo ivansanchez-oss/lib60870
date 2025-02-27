@@ -6,6 +6,8 @@
 #include "hal_thread.h"
 #include "hal_serial.h"
 #include "cs101_master.h"
+#include "hal_socket.h"
+#include "hal_socket.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -35,6 +37,8 @@ rawMessageHandler (void* parameter, uint8_t* msg, int msgSize, bool sent)
 
     printf("\n");
 }
+
+
 
 static bool
 asduReceivedHandler (void* parameter, int address, CS101_ASDU asdu)
@@ -106,18 +110,41 @@ linkLayerStateChanged(void* parameter, int address, LinkLayerState state)
     }
 }
 
+
+static void
+linkLayerStateChanged2(void* parameter, int address, LinkLayerState state)
+{
+    printf("Link layer state: ");
+
+    switch (state) {
+    case LL_STATE_IDLE:
+        printf("IDLE2\n");
+        break;
+    case LL_STATE_ERROR:
+        printf("ERROR2\n");
+        break;
+    case LL_STATE_BUSY:
+        printf("BUSY2\n");
+        break;
+    case LL_STATE_AVAILABLE:
+        printf("AVAILABLE2\n");
+        break;
+    }
+}
+
 int
 main(int argc, char** argv)
 {
     signal(SIGINT, sigint_handler);
 
-    const char* serialPort = "overtcp://192.168.1.222:20026";
+    const char* serialPort = "overtcp://192.168.1.222:20026:10";
     //const char* serialPort = "/dev/ttyUSB0";
 
     if (argc > 1)
         serialPort = argv[1];
 
     SerialPort port = SerialPort_create(serialPort, 9600, 8, 'E', 1);
+
 
     CS101_Master master = CS101_Master_create(port, NULL, NULL, IEC60870_LINK_LAYER_BALANCED);
 
@@ -136,16 +163,22 @@ main(int argc, char** argv)
 
     /* set handler for link layer state changes */
     CS101_Master_setLinkLayerStateChanged(master, linkLayerStateChanged, NULL);
+    SerialPort_setLinkLayerStateCallback(port, linkLayerStateChanged2, NULL);
 
     /* log messages */
     CS101_Master_setRawMessageHandler(master, rawMessageHandler, NULL);
 
-    SerialPort_open(port);
+    bool is_open = false;
+    do 
+    {
+        is_open = SerialPort_open(port);
+        Thread_sleep(10000);
+    } 
+    while (!is_open);       
 
     running = true;
 
-    int cycleCounter = 0;
-
+    int cycleCounter = 0;    
     while (running) {
 
         CS101_Master_run(master);

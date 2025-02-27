@@ -11,7 +11,8 @@
 #define SOCKET_HAL_H_
 
 #include "hal_base.h"
-
+#include "iec60870_common.h" 
+#include "hal_serial.h"
 /**
  * \file hal_socket.h
  * \brief Abstraction layer TCP/IP sockets
@@ -58,6 +59,11 @@ typedef enum
     SOCKET_STATE_FAILED = 1,
     SOCKET_STATE_CONNECTED = 2
 } SocketState;
+
+int SerialPort_isRunning(SerialPort self);
+
+
+void SerialPort_setLinkLayerStateCallback(SerialPort self, IEC60870_LinkLayerStateChangedHandler callback, void* parameter);
 
 
 /**
