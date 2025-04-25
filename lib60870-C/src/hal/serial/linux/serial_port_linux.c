@@ -178,7 +178,7 @@ SerialPort_open(SerialPort self)
            // printf("Socket ya es NULL antes de intentar destruirlo.\n");
         }          
       
-        self->lastConnection = Hal_getTimeInMs();
+        self->lastConnection = Hal_getMonotonicTimeInMs();
 
         self->socket = TcpSocket_create();
         if (self->socket == NULL) {   
@@ -373,11 +373,13 @@ void reConnect(SerialPort self){
 
     if (self->socket != NULL) {
         self->running = Socket_checkAsyncConnectState(self->socket);
+        
      } else {
          //printf("Socket es NULL.\n");
+
      }        
 
-     uint64_t delta = Hal_getTimeInMs() - self->lastConnection; 
+     uint64_t delta = Hal_getMonotonicTimeInMs()- self->lastConnection; 
      int retry = self->retry * 1000; // s a ms 
 
      if (delta > retry){
