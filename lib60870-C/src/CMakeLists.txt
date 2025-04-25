@@ -101,6 +101,15 @@ add_definitions(-DLIB60870_HAS_TLS_SUPPORT=1)
 
 ENDIF(WITH_MBEDTLS)
 
+IF(WITH_MBEDTLS3)
+
+list (APPEND library_SRCS ${tls_SRCS})
+list (APPEND library_SRCS ./hal/tls/mbedtls3/tls_mbedtls.c)
+
+add_definitions(-DLIB60870_HAS_TLS_SUPPORT=1)
+
+ENDIF(WITH_MBEDTLS3)
+
 include (GenerateExportHeader)
 
 set(RES_FILES "")
@@ -140,18 +149,11 @@ GENERATE_EXPORT_HEADER(lib60870-shared
 add_library (lib60870 STATIC ${library_SRCS})
 
 IF(UNIX)
-  IF (CONFIG_SYSTEM_HAS_CLOCK_GETTIME)
-     target_link_libraries (lib60870
-         -lpthread
-         -lm
-         -lrt
-     )
-  ELSE ()
-     target_link_libraries (lib60870
-         -lpthread
-         -lm
-     )
-  ENDIF (CONFIG_SYSTEM_HAS_CLOCK_GETTIME)
+    target_link_libraries (lib60870
+        -lpthread
+        -lm
+        -lrt
+    )
 
   configure_file(
     ${CMAKE_CURRENT_LIST_DIR}/lib60870.pc.in
@@ -160,11 +162,13 @@ IF(UNIX)
   install(FILES "${CMAKE_CURRENT_BINARY_DIR}/lib60870.pc" DESTINATION "${CMAKE_INSTALL_PREFIX}/share/pkgconfig")
 ENDIF(UNIX)
 IF(MINGW)
-  target_link_libraries(lib60870-shared ws2_32 iphlpapi)
-  target_link_libraries(lib60870 ws2_32 iphlpapi)
+  target_link_libraries(lib60870-shared ws2_32 iphlpapi bcrypt)
+  target_link_libraries(lib60870 ws2_32 iphlpapi bcrypt)
 ENDIF(MINGW)
-
-
+IF(MSVC)
+  target_link_libraries(lib60870-shared ws2_32 iphlpapi bcrypt)
+  target_link_libraries(lib60870 ws2_32 iphlpapi bcrypt)
+ENDIF(MSVC)
 
 install (TARGETS lib60870 lib60870-shared
 	RUNTIME DESTINATION bin COMPONENT Applications

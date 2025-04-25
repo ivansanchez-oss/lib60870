@@ -188,9 +188,6 @@ extern "C" {
 void
 CS101_ASDU_encode(CS101_ASDU self, Frame frame);
 
-CS101_ASDU
-CS101_ASDU_createFromBuffer(CS101_AppLayerParameters parameters, uint8_t* msg, int msgLength);
-
 #ifdef __cplusplus
 }
 #endif
@@ -938,17 +935,19 @@ test_CS104SlaveConnectionIsRedundancyGroup_enqueueThreadFunction(void* parameter
 
         CS101_ASDU newAsdu = CS101_ASDU_create(alParams, false, CS101_COT_PERIODIC, 0, 1, false, false);
 
-          InformationObject io = (InformationObject) MeasuredValueScaled_create(NULL, 110, scaledValue, IEC60870_QUALITY_GOOD);
+        InformationObject io = (InformationObject) MeasuredValueScaled_create(NULL, 110, scaledValue, IEC60870_QUALITY_GOOD);
 
-          scaledValue++;
+        scaledValue++;
 
-          CS101_ASDU_addInformationObject(newAsdu, io);
+        CS101_ASDU_addInformationObject(newAsdu, io);
 
-          InformationObject_destroy(io);
+        InformationObject_destroy(io);
 
-          CS104_Slave_enqueueASDU(info->slave, newAsdu);
+        CS104_Slave_enqueueASDU(info->slave, newAsdu);
 
-          CS101_ASDU_destroy(newAsdu);
+        CS101_ASDU_destroy(newAsdu);
+
+        Thread_sleep(10);
     }
 
     return NULL;
@@ -1022,15 +1021,88 @@ test_CS104SlaveSingleRedundancyGroup()
 
         CS104_Connection_sendStartDT(con);
 
-        Thread_sleep(10);
-
         CS104_Connection_close(con);
+
+        Thread_sleep(10);
     }
 
     info.running = false;
     Thread_destroy(enqueueThread);
 
     CS104_Connection_destroy(con);
+
+    CS104_Slave_destroy(slave);
+}
+
+static void
+test_CS104SlaveSingleRedundancyGroupMultipleConnectionsEventHandler(void* parameter, IMasterConnection connection, CS104_PeerConnectionEvent event)
+{
+    char ipAddrBuf[100];
+    ipAddrBuf[0] = 0;
+
+    IMasterConnection_getPeerAddress(connection, ipAddrBuf, 100);
+}
+
+void
+test_CS104SlaveSingleRedundancyGroupMultipleConnections()
+{
+    CS104_Slave slave = CS104_Slave_create(100, 100);
+
+    CS104_Slave_setServerMode(slave, CS104_MODE_SINGLE_REDUNDANCY_GROUP);
+    CS104_Slave_setLocalPort(slave, 20004);
+
+    CS104_Slave_start(slave);
+    CS104_Slave_setMaxOpenConnections(slave, 20);
+    CS104_Slave_setConnectionEventHandler(slave, test_CS104SlaveSingleRedundancyGroupMultipleConnectionsEventHandler, NULL);
+
+    struct test_CS104SlaveConnectionIsRedundancyGroup_Info info;
+    info.running = true;
+    info.slave = slave;
+
+    CS104_Connection cons[3];
+    int conState[3]; /* 0 = idle, 1 = connected, 2 = START_DT sent */
+
+    cons[0] = CS104_Connection_create("127.0.0.1", 20004);
+    cons[1] = CS104_Connection_create("127.0.0.1", 20004);
+    cons[2] = CS104_Connection_create("127.0.0.1", 20004);
+
+    conState[0] = 0;
+    conState[1] = 0;
+    conState[2] = 0;
+
+    Thread enqueueThread = Thread_create(test_CS104SlaveConnectionIsRedundancyGroup_enqueueThreadFunction, &info, false);
+    Thread_start(enqueueThread);
+
+    int i;
+    for (i = 0; i < 200; i++)
+    {
+       // printf("round %i\n", i);
+
+        int con = rand() % 3;
+
+        if (conState[con] == 0) {
+            bool result = CS104_Connection_connect(cons[con]);
+            TEST_ASSERT_TRUE(result);
+            conState[con] = 1;
+        }
+        else if (conState[con] == 1) {
+            CS104_Connection_sendStartDT(cons[con]);
+            conState[con] = 2;
+        }
+        else if (conState[con] == 2) {
+            CS104_Connection_close(cons[con]);
+            conState[con] = 0;
+        }
+
+        Thread_sleep(50);
+    }
+
+    CS104_Connection_destroy(cons[0]);
+    CS104_Connection_destroy(cons[1]);
+    CS104_Connection_destroy(cons[2]);
+
+    info.running = false;
+    Thread_destroy(enqueueThread);
 
     CS104_Slave_destroy(slave);
 }
@@ -1048,11 +1120,12 @@ test_CS104SlaveEventQueue1_asduReceivedHandler (void* parameter, int address, CS
 
     info->asduHandlerCalled++;
 
-    if (CS101_ASDU_getCOT(asdu) == CS101_COT_SPONTANEOUS) {
+    if (CS101_ASDU_getCOT(asdu) == CS101_COT_SPONTANEOUS)
+    {
         info->spontCount++;
 
-
-        if (CS101_ASDU_getTypeID(asdu) == M_ME_NB_1) {
+        if (CS101_ASDU_getTypeID(asdu) == M_ME_NB_1)
+        {
             static uint8_t ioBuf[250];
 
             MeasuredValueScaled mv = (MeasuredValueScaled) CS101_ASDU_getElementEx(asdu, (InformationObject) ioBuf, 0);
@@ -4788,6 +4861,44 @@ test_DelayAcquisitionCommand(void)
 
     CS101_ASDU_destroy(asdu2);
 }
+void
+test_TestCommand(void)
+{
+    TestCommand tc;
+    tc = TestCommand_create(NULL);
+
+    uint8_t buffer[256];
+    struct sBufferFrame bf;
+
+    Frame f = BufferFrame_initialize(&bf, buffer, 0);
+
+    CS101_ASDU asdu = CS101_ASDU_create(&defaultAppLayerParameters, false, CS101_COT_ACTIVATION, 0, 1, false, false);
+
+    CS101_ASDU_addInformationObject(asdu, (InformationObject) tc);
+
+    TestCommand_destroy(tc);
+
+    CS101_ASDU_encode(asdu, f);
+
+    TEST_ASSERT_EQUAL_INT(11, Frame_getMsgSize(f));
+
+    CS101_ASDU_destroy(asdu);
+
+    CS101_ASDU asdu2 = CS101_ASDU_createFromBuffer(&defaultAppLayerParameters, buffer, Frame_getMsgSize(f));
+
+    TEST_ASSERT_EQUAL_INT(1, CS101_ASDU_getNumberOfElements(asdu2));
+
+    TestCommand tc_dec = (TestCommand) CS101_ASDU_getElement(asdu2, 0);
+
+    TEST_ASSERT_EQUAL_INT(0, InformationObject_getObjectAddress((InformationObject )tc_dec));
+    TEST_ASSERT_EQUAL_INT(0xaa, buffer[9]);
+    TEST_ASSERT_EQUAL_INT(0x55, buffer[10]);
+    TEST_ASSERT_TRUE(TestCommand_isValid(tc_dec));
+
+    TestCommand_destroy(tc_dec);
+
+    CS101_ASDU_destroy(asdu2);
+}
 
 void
 test_BitString32(void)
@@ -5014,6 +5125,16 @@ test_BitString32xx_encodeDecode(void)
 
     CS101_ASDU_destroy(asdu2);
 #endif
+}
+
+void
+test_version_number(void)
+{
+    Lib60870VersionInfo version = Lib60870_getLibraryVersionInfo();
+
+    TEST_ASSERT_EQUAL_INT(2, version.major);
+    TEST_ASSERT_EQUAL_INT(3, version.minor);
+    TEST_ASSERT_EQUAL_INT(4, version.patch);
 }
 
 void
@@ -6329,10 +6450,138 @@ test_ASDUsetGetNumberOfElements(void)
     CS101_ASDU_destroy(asdu);
 }
 
+static uint8_t STARTDT_ACT_MSG[] = { 0x68, 0x04, 0x07, 0x00, 0x00, 0x00 };
+static uint8_t STOPDT_ACT_MSG[] = { 0x68, 0x04, 0x13, 0x00, 0x00, 0x00 };
+
+void
+test_CS104SlaveUnconfirmedStoppedMode()
+{
+    CS104_Slave slave = CS104_Slave_create(10, 10);
+
+    CS104_Slave_setServerMode(slave, CS104_MODE_SINGLE_REDUNDANCY_GROUP);
+    CS104_Slave_setLocalPort(slave, 20004);
+
+    CS104_Slave_start(slave);
+
+    CS101_AppLayerParameters alParams = CS104_Slave_getAppLayerParameters(slave);
+
+    struct stest_CS104SlaveEventQueue1 info;
+    info.asduHandlerCalled = 0;
+    info.spontCount = 0;
+    info.lastScaledValue = 0;
+
+    int16_t scaledValue = 0;
+
+    for (int i = 0; i < 15; i++) {
+        CS101_ASDU newAsdu = CS101_ASDU_create(alParams, false, CS101_COT_SPONTANEOUS, 0, 1, false, false);
+
+        InformationObject io = (InformationObject) MeasuredValueScaled_create(NULL, 110, scaledValue, IEC60870_QUALITY_GOOD);
+
+        scaledValue++;
+
+        CS101_ASDU_addInformationObject(newAsdu, io);
+
+        InformationObject_destroy(io);
+
+        CS104_Slave_enqueueASDU(slave, newAsdu);
+
+        CS101_ASDU_destroy(newAsdu);
+    }
+
+    CS104_Connection con = CS104_Connection_create("127.0.0.1", 20004);
+
+    CS104_Connection_setASDUReceivedHandler(con, test_CS104SlaveEventQueue1_asduReceivedHandler, &info);
+
+    bool result = CS104_Connection_connect(con);
+    TEST_ASSERT_TRUE(result);
+
+    CS104_Connection_sendStartDT(con);
+
+    Thread_sleep(500);
+
+    CS104_Connection_sendStopDT(con);
+
+    CS104_Connection_close(con);
+
+    TEST_ASSERT_EQUAL_INT(14, info.lastScaledValue);
+
+    info.asduHandlerCalled = 0;
+    info.spontCount = 0;
+
+    result = CS104_Connection_connect(con);
+    TEST_ASSERT_TRUE(result);
+
+    CS104_Connection_sendStartDT(con);
+
+    for (int i = 0; i < 6; i++)
+    {
+        Thread_sleep(10);
+
+        CS101_ASDU newAsdu = CS101_ASDU_create(alParams, false, CS101_COT_SPONTANEOUS, 0, 1, false, false);
+
+        InformationObject io = (InformationObject) MeasuredValueScaled_create(NULL, 110, scaledValue, IEC60870_QUALITY_GOOD);
+
+        scaledValue++;
+
+        CS101_ASDU_addInformationObject(newAsdu, io);
+
+        InformationObject_destroy(io);
+
+        CS104_Slave_enqueueASDU(slave, newAsdu);
+
+        CS101_ASDU_destroy(newAsdu);
+    }
+
+    Thread_sleep(500);
+
+    TEST_ASSERT_EQUAL_INT(6, CS104_Connection_sendMessage(con, STOPDT_ACT_MSG, sizeof(STOPDT_ACT_MSG)));
+
+    Thread_sleep(5000);
+
+    CS104_Connection_close(con);
+
+    TEST_ASSERT_EQUAL_INT(6, info.asduHandlerCalled);
+    TEST_ASSERT_EQUAL_INT(6, info.spontCount);
+    TEST_ASSERT_EQUAL_INT(20, info.lastScaledValue);
+
+    CS104_Connection_destroy(con);
+
+    CS104_Slave_destroy(slave);
+}
+
+#define SCALED_VALUE_MAX 32767
+#define SCALED_VALUE_MIN -32768
+#define NORMALIZED_VALUE_MAX (32767.f/32768.f)
+
+void
+test_ScaledNormalizedConversion()
+{
+    TEST_ASSERT_EQUAL_INT(32767, NormalizedValue_toScaled(NORMALIZED_VALUE_MAX));
+    TEST_ASSERT_EQUAL_INT(32767, NormalizedValue_toScaled(1.0f));
+    TEST_ASSERT_EQUAL_INT(32767, NormalizedValue_toScaled(2.0f));
+    TEST_ASSERT_EQUAL_INT(-32768, NormalizedValue_toScaled(-1.0f));
+    TEST_ASSERT_EQUAL_INT(-32768, NormalizedValue_toScaled(-2.0f));
+    TEST_ASSERT_EQUAL_INT(0, NormalizedValue_toScaled(0.0f));
+    TEST_ASSERT_EQUAL_INT(0, NormalizedValue_toScaled(-0.0f));
+
+    float normalizedUnit = (1.f - NORMALIZED_VALUE_MAX);
+
+    TEST_ASSERT_EQUAL_FLOAT(NORMALIZED_VALUE_MAX - normalizedUnit, NormalizedValue_fromScaled(32766));
+    TEST_ASSERT_EQUAL_FLOAT(NORMALIZED_VALUE_MAX, NormalizedValue_fromScaled(32767));
+    TEST_ASSERT_EQUAL_FLOAT(NORMALIZED_VALUE_MAX, NormalizedValue_fromScaled(32768));
+    TEST_ASSERT_EQUAL_FLOAT(NORMALIZED_VALUE_MAX, NormalizedValue_fromScaled(99999));
+    TEST_ASSERT_EQUAL_FLOAT(-1.0f + (normalizedUnit * 2.f), NormalizedValue_fromScaled(-32766));
+    TEST_ASSERT_EQUAL_FLOAT(-1.0f + normalizedUnit, NormalizedValue_fromScaled(-32767));
+    TEST_ASSERT_EQUAL_FLOAT(-1.0f, NormalizedValue_fromScaled(-32768));
+    TEST_ASSERT_EQUAL_FLOAT(-1.0f, NormalizedValue_fromScaled(-32769));
+    TEST_ASSERT_EQUAL_FLOAT(0.0f, NormalizedValue_fromScaled(0));
+}
+
 int
 main(int argc, char** argv)
 {
     UNITY_BEGIN();
+    RUN_TEST(test_version_number);
     RUN_TEST(test_CS104_Slave_CreateDestroy);
     RUN_TEST(test_CS104_MasterSlave_CreateDestroyLoop);
     RUN_TEST(test_CS104_Connection_CreateDestroy);
@@ -6398,6 +6647,7 @@ main(int argc, char** argv)
     RUN_TEST(test_ClockSynchronizationCommand);
     RUN_TEST(test_ResetProcessCommand);
     RUN_TEST(test_DelayAcquisitionCommand);
+    RUN_TEST(test_TestCommand);
 
     RUN_TEST(test_BitString32);
     RUN_TEST(test_Bitstring32CommandWithCP56Time2a);
@@ -6410,6 +6660,7 @@ main(int argc, char** argv)
 
     RUN_TEST(test_CS104SlaveConnectionIsRedundancyGroup);
     RUN_TEST(test_CS104SlaveSingleRedundancyGroup);
+    RUN_TEST(test_CS104SlaveSingleRedundancyGroupMultipleConnections);
 
     RUN_TEST(test_CS104SlaveEventQueue1);
     RUN_TEST(test_CS104SlaveEventQueueOverflow);
@@ -6447,6 +6698,10 @@ main(int argc, char** argv)
 
     RUN_TEST(test_ASDUsetGetNumberOfElements);
     RUN_TEST(test_CS101_ASDU_clone);
+
+    RUN_TEST(test_CS104SlaveUnconfirmedStoppedMode);
+
+    RUN_TEST(test_ScaledNormalizedConversion);
 
     return UNITY_END();
 }
